@@ -1,14 +1,15 @@
 // State
 
-import {SignallingChannel} from "./signalling-channel";
+import {SignallingChannel} from "./signalling-server/signalling-channel";
+import {Subscription} from "rxjs";
 
 export interface State {
-  name?: string;
+  name?: string
+  uuid?: string
   peers: Peer[]
   connectionStatus: ConnectionStatus
   stream?: MediaStream
   devices: MediaDeviceInfo[]
-  signallingChannel?: SignallingChannel
 }
 
 export interface Peer {
@@ -25,12 +26,127 @@ export interface Message {
 }
 
 export type ConnectionStatus = 'CLOSED' | 'CONNECTED'
+
 export type DataChannelStatus = 'READY' | 'NOT_READY'
 
 export const INITIAL_STATE: State = {
   peers: [],
   connectionStatus: "CLOSED",
   devices: []
+}
+
+// Reducer
+export const reducer = (state: State, action: AppAction): State => {
+  console.log("DISPATCH ACTION:", action.type, action);
+  switch (action.type) {
+    case "SetName":
+      signallingChannel.setName(action.name)
+      sessionStorage.setItem('web-rtc-name', action.name)
+      return {
+        ...state,
+        name: action.name
+      }
+    case "SetPeerName": {
+      const peer = state.peers.find(p => p.uuid === action.peerUUID)
+      if (!peer) {
+        return state
+      }
+      return {
+        ...state,
+        peers: [
+          ...state.peers.filter(p => p.uuid !== action.peerUUID),
+          {...peer, name: action.name}
+        ]
+
+      };
+    }
+    case "SetDevices":
+      return {
+        ...state,
+        devices: action.devices || []
+      }
+    case "SetMediaStream":
+      return {
+        ...state,
+        stream: action.stream
+      }
+    case "SetConnectionStatus":
+      return {
+        ...state,
+        uuid: action.uuid,
+        connectionStatus: action.status
+      }
+    case "AddPeer":
+      return {
+        ...state,
+        peers: [...state.peers, action.peer]
+      }
+    case "RemovePeer":
+      return {
+        ...state,
+        peers: state.peers.filter(p => p.uuid !== action.peer.uuid)
+      }
+    case "MakeCall":
+      signallingChannel.connectTo(action.peer)
+      return state;
+    case "DataChannelStatusChange": {
+      const peer = state.peers.find(p => p.uuid === action.peerUUID)
+      if (!peer) {
+        return state
+      }
+      return {
+        ...state,
+        peers: [
+          ...state.peers.filter(p => p.uuid !== action.peerUUID),
+          {...peer, dataChannelStatus: action.status}
+        ]
+      };
+    }
+    case "SendMessage": {
+      signallingChannel.sendMessage(action.peer, action.msg)
+      const peer = state.peers.find(p => p.uuid === action.peer.uuid)
+      if (!peer) {
+        return state
+      }
+      const messages = peer?.messages || []
+      return {
+        ...state,
+        peers: [
+          ...state.peers.filter(p => p.uuid !== peer.uuid),
+          {...peer, messages: [...messages, {direction: 'OUT', text: action.msg}]}
+        ]
+      };
+    }
+    case "ReceivedMessage": {
+      const peer = state.peers.find(p => p.uuid === action.peerUUID)
+      if (!peer) {
+        return state
+      }
+      const messages = peer?.messages || []
+      return {
+        ...state,
+        peers: [
+          ...state.peers.filter(p => p.uuid !== action.peerUUID),
+          {...peer, messages: [...messages, {direction: 'IN', text: action.msg}]}
+        ]
+      };
+    }
+    case "IceConnected": {
+      const peer = state.peers.find(p => p.uuid === action.peerUUID)
+      if (!peer) {
+        return state
+      }
+      return {
+        ...state,
+        peers: [
+          ...state.peers.filter(p => p.uuid !== action.peerUUID),
+          {...peer, iceConnected: true}
+        ]
+      };
+    }
+    default:
+      return state;
+  }
 }
 
 // Actions
@@ -65,14 +181,10 @@ export interface SetDevices {
   devices: MediaDeviceInfo[]
 }
 
-export interface SetSignallingChannel {
-  type: 'SetSignallingChannel'
-  signallingChannel: SignallingChannel
-}
-
 export interface SetConnectionStatus {
   type: 'SetConnectionStatus'
   status: ConnectionStatus
+  uuid?: string
 }
 
 interface MakeCall {
@@ -110,7 +222,6 @@ export type AppAction =
   RemovePeer |
   SetMediaStream |
   SetDevices |
-  SetSignallingChannel |
   SetConnectionStatus |
   MakeCall |
   IceConnected |
@@ -119,129 +230,62 @@ export type AppAction =
   ReceivedMessage
   ;
 
-// Reducer
-export const reducer = (state: State, action: AppAction): State => {
-  switch (action.type) {
-    case "SetName":
-      state.signallingChannel?.setName(action.name)
-      sessionStorage.setItem('web-rtc-name', action.name)
-      return {
-        ...state,
-        name: action.name
-      }
-    case "SetPeerName": {
-      console.log('SetPeerName', action)
-      const peer = state.peers.find(p => p.uuid === action.peerUUID)
-      if (!peer) {
-        return state
-      }
-      return {
-        ...state,
-        peers: [
-          ...state.peers.filter(p => p.uuid !== action.peerUUID),
-          {...peer, name: action.name}
-        ]
 
-      };
+const signallingChannel = new SignallingChannel();
+
+export function createSignallingChannelSubscription(dispatch: React.Dispatch<AppAction>): Subscription {
+  const sub = signallingChannel.events$.subscribe(event => {
+    console.log("SIGNALLING EVENT:", event.event, event);
+    switch (event.event) {
+      case "connected":
+        dispatch({type: "SetConnectionStatus", status: "CONNECTED", uuid: event.uuid})
+        break;
+      case "closed":
+        dispatch({type: "SetConnectionStatus", status: "CLOSED"})
+        break;
+      case "peer_added":
+        dispatch({type: "AddPeer", peer: {name: event.name, uuid: event.uuid}})
+        break;
+      case "set_peer_info":
+        dispatch({type: "SetPeerName", name: event.name, peerUUID: event.uuid})
+        break;
+      case "peer_removed":
+        dispatch({type: "RemovePeer", peer: {name: event.name, uuid: event.uuid}})
+        break;
+      case "rtc_offer":
+        break;
+      case "rtc_answer":
+        break;
+      case "new_ice_candidate":
+        dispatch({type: 'IceConnected', peerUUID: event.fromPeerUUID})
+        break;
+      case "PeerSignal":
+        switch (event.peerEvent.name) {
+          case "IceConnected":
+            dispatch({type: 'IceConnected', peerUUID: event.peerEvent.peer.value});
+            break;
+          case "ReceivedDataMessage":
+            dispatch({
+              type: "ReceivedMessage",
+              peerUUID: event.peerEvent.peer.value,
+              msg: event.peerEvent.text
+            });
+            break;
+          case "DataChannelStatusChange":
+            dispatch({
+              type: "DataChannelStatusChange",
+              peerUUID: event.peerEvent.peer.value,
+              status: event.peerEvent.status
+            })
+            break;
+        }
+        break;
+      default:
+        console.log("Unexpected event", event);
     }
-    case "SetDevices":
-      console.log('Devices found:', action.devices);
-      return {
-        ...state,
-        devices: action.devices || []
-      }
-    case "SetMediaStream":
-      console.log('Got MediaStream:', action.stream)
-      return {
-        ...state,
-        stream: action.stream
-      }
-    case "SetSignallingChannel":
-      return {
-        ...state,
-        signallingChannel: action.signallingChannel
-      }
-    case "SetConnectionStatus":
-      return {
-        ...state,
-        connectionStatus: action.status
-      }
-    case "AddPeer":
-      return {
-        ...state,
-        peers: [...state.peers, action.peer]
-      }
-    case "RemovePeer":
-      return {
-        ...state,
-        peers: state.peers.filter(p => p.uuid !== action.peer.uuid)
-      }
-    case "MakeCall":
-      state.signallingChannel?.connectTo(action.peer)
-      return state;
-    case "DataChannelStatusChange": {
-      console.log('DataChannelStatusChange', action)
-      const peer = state.peers.find(p => p.uuid === action.peerUUID)
-      if (!peer) {
-        return state
-      }
-      return {
-        ...state,
-        peers: [
-          ...state.peers.filter(p => p.uuid !== action.peerUUID),
-          {...peer, dataChannelStatus: action.status}
-        ]
-      };
-    }
-    case "SendMessage": {
-      console.log('SendMessage', action)
-      state.signallingChannel?.sendMessage(action.peer, action.msg)
-      const peer = state.peers.find(p => p.uuid === action.peer.uuid)
-      if (!peer) {
-        return state
-      }
-      const messages = peer?.messages || []
-      return {
-        ...state,
-        peers: [
-          ...state.peers.filter(p => p.uuid !== peer.uuid),
-          {...peer, messages: [...messages, {direction: 'OUT', text: action.msg}]}
-        ]
-      };
-    }
-    case "ReceivedMessage": {
-      console.log('ReceivedMessage', action)
-      const peer = state.peers.find(p => p.uuid === action.peerUUID)
-      if (!peer) {
-        return state
-      }
-      const messages = peer?.messages || []
-      return {
-        ...state,
-        peers: [
-          ...state.peers.filter(p => p.uuid !== action.peerUUID),
-          {...peer, messages: [...messages, {direction: 'IN', text: action.msg}]}
-        ]
-      };
-    }
-    case "IceConnected": {
-      console.log('IceConnected', action)
-      const peer = state.peers.find(p => p.uuid === action.peerUUID)
-      if (!peer) {
-        return state
-      }
-      const messages = peer?.messages || []
-      return {
-        ...state,
-        peers: [
-          ...state.peers.filter(p => p.uuid !== action.peerUUID),
-          {...peer, iceConnected: true}
-        ]
-      };
-    }
-    default:
-      return state;
-  }
+  });
+
+  signallingChannel.start();
+
+  return sub;
 }
-
-
