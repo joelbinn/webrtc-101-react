@@ -1,5 +1,6 @@
-import {DataChannelStatus} from "../state";
 import {UUID} from "./uuid";
+
+export type DataChannelStatus = 'READY' | 'NOT_READY'
 
 export interface ConnectedEvent {
   event: "connected"
@@ -77,21 +78,21 @@ export interface DataChannelStatusChange {
   status: DataChannelStatus
 }
 
+
 export function iceConnected(peer: UUID): RtcSignal {
   return {name: 'IceConnected', peer};
 }
 
-
 export function dataChannelStatusChange(peer: UUID, status: DataChannelStatus): DataChannelStatusChange {
   return {name: 'DataChannelStatusChange', peer, status};
 }
+
 
 export interface ReceivedDataMessage {
   name: 'ReceivedDataMessage'
   peer: UUID
   text: string
 }
-
 
 export function receivedDataMessage(peer: UUID, text: string): ReceivedDataMessage {
   return {name: 'ReceivedDataMessage', peer, text};
@@ -102,4 +103,3 @@ export type PeerEvent =
   DataChannelStatusChange |
   ReceivedDataMessage
 ;
-

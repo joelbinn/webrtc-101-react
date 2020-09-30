@@ -2,6 +2,7 @@
 
 import {SignallingChannel} from "./signalling-server/signalling-channel";
 import {Subscription} from "rxjs";
+import {DataChannelStatus} from "./signalling-server/signalling-events";
 
 export interface State {
   name?: string
@@ -26,8 +27,6 @@ export interface Message {
 }
 
 export type ConnectionStatus = 'CLOSED' | 'CONNECTED'
-
-export type DataChannelStatus = 'READY' | 'NOT_READY'
 
 export const INITIAL_STATE: State = {
   peers: [],
