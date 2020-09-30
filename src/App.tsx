@@ -1,39 +1,50 @@
-import React, {useEffect, useReducer, useRef, useState} from 'react'
+import React, {useEffect, useRef} from 'react'
+import {useState, useReducer} from 'reinspect'
 import './App.css'
-import {INITIAL_STATE, reducer} from "./state";
-import {SignallingChannel} from "./signalling-channel";
+import {createSignallingChannelSubscription, INITIAL_STATE, reducer} from "./state";
 import PeerView from "./PeerView";
+import {Subscription} from "rxjs";
+
 
 const App: React.FC = () => {
   const videoElement = useRef<HTMLVideoElement>(null);
-  const [name, setName] = useState('')
-  const [state, dispatch] = useReducer(reducer, INITIAL_STATE)
+  const [name, setName] = useState('', 'name' )
+  const [signallingChannelSubscription, setSignallingChannelSubscription] = useState<Subscription|undefined>(undefined, 'subscription')
+  const [state, dispatch] = useReducer(reducer, INITIAL_STATE, state => state, 'App reducer')
   useEffect(() => {
+    console.log("APP USE EFFECT")
+
     async function init() {
+      console.log("APP INIT")
       try {
         const videoCameras = await getConnectedDevices('videoinput')
+        console.log("SET DEVICES")
         dispatch({type: "SetDevices", devices: videoCameras})
 
         const stream = await openMediaDevices({
           'video': {deviceId: videoCameras[0]?.deviceId},
           'audio': true
         })
+        console.log("SET MEDIA STREAM")
         dispatch({type: "SetMediaStream", stream})
 
         if (videoElement.current) {
           videoElement.current.srcObject = stream;
         }
 
-        if (!state.signallingChannel) {
-          dispatch({
-            type: "SetSignallingChannel",
-            signallingChannel: new SignallingChannel(dispatch)
-          })
-        }
-
         const name = sessionStorage.getItem('web-rtc-name')
         if (name) {
           setTimeout(() => dispatch({type: "SetName", name}), 100);
+        }
+
+        if (!signallingChannelSubscription) {
+          setSignallingChannelSubscription(createSignallingChannelSubscription(dispatch))
+        }
+
+        return () => {
+          if (signallingChannelSubscription) {
+            signallingChannelSubscription.unsubscribe();
+          }
         }
 
       } catch (error) {
@@ -47,12 +58,7 @@ const App: React.FC = () => {
 
     init()
 
-    return () => {
-      if (state.signallingChannel !== undefined) {
-        state.signallingChannel.close()
-      }
-    }
-  }, [state.signallingChannel, state.stream])
+  }, [state.stream, signallingChannelSubscription])
 
   return (
     <div className="App">
@@ -73,9 +79,7 @@ const App: React.FC = () => {
             </>
           }
           <dt>UUID</dt>
-          <dd>{state.signallingChannel && state.signallingChannel?.uuid}</dd>
-          <dt>WS open</dt>
-          <dd>{state.signallingChannel && JSON.stringify(state.signallingChannel?.isOpen)}</dd>
+          <dd>{state?.uuid}</dd>
         </dl>
         <h2>Peers</h2>
         {state.peers.map(peer =>

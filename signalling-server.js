@@ -7,15 +7,17 @@ wss.on('connection', (ws) => {
   ws.uuid = uuid.v4();
   connections[ws.uuid] = ws
   console.log('connected', ws.uuid);
-  ws.send(JSON.stringify({event: 'connected', uuid: ws.uuid}));
+  setTimeout(() => {
+    ws.send(JSON.stringify({event: 'connected', uuid: ws.uuid}));
 
-  Object.values(connections)
-  .filter(c => c.uuid !== ws.uuid)
-  .forEach(c => c.send(JSON.stringify({event: 'peer_added', uuid: ws.uuid, name: ws.name})))
+    Object.values(connections)
+    .filter(c => c.uuid !== ws.uuid)
+    .forEach(c => c.send(JSON.stringify({event: 'peer_added', uuid: ws.uuid, name: ws.name})))
 
-  Object.values(connections)
-  .filter(c => c.uuid !== ws.uuid)
-  .forEach(c => ws.send(JSON.stringify({event: 'peer_added', uuid: c.uuid, name: c.name})))
+    Object.values(connections)
+    .filter(c => c.uuid !== ws.uuid)
+    .forEach(c => ws.send(JSON.stringify({event: 'peer_added', uuid: c.uuid, name: c.name})))
+  },10)
 
   ws.on('message', function incoming(data) {
     const msg = JSON.parse(data)
@@ -37,7 +39,6 @@ wss.on('connection', (ws) => {
         break;
       }
     }
-    console.log('message', data);
   });
 
   ws.on('close', () => {

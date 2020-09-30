@@ -3,10 +3,14 @@ import ReactDOM from 'react-dom';
 import './index.css';
 import App from './App';
 import * as serviceWorker from './serviceWorker';
+import {StateInspector} from "reinspect";
+import '@fortawesome/fontawesome-free/css/all.css';
 
 ReactDOM.render(
   <React.StrictMode>
-    <App />
+    <StateInspector name="App kaka">
+      <App />
+    </StateInspector>
   </React.StrictMode>,
   document.getElementById('root')
 );
