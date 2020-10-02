@@ -2,16 +2,28 @@ import {SignallingChannel} from "./signalling-channel";
 import {UUID} from "./uuid";
 import {dataChannelStatusChange, iceConnected, receivedDataMessage} from "./signalling-events";
 
+const audioContext = new AudioContext();
+const localOutput = audioContext.createMediaStreamDestination();
+
+
 export class PeerProxy {
   private constructor(
     public readonly ownUUID: UUID,
     public readonly remotePeerUUID: UUID,
     private readonly signallingChannel: SignallingChannel
   ) {
+    this.localTracks = getLocalTracks();
+    this.localTracks.then(ts => console.log('---'))
+      .catch(e => console.log('Error fetching local tracks', e))
+    this.remoteStream = new Promise(r => this.resolveRemoteStream = r)
   }
 
   private peerConnection?: RTCPeerConnection;
   private msgChannel?: RTCDataChannel;
+  private readonly localTracks: Promise<LocalTracks>;
+  private readonly remoteStream: Promise<MediaStream>;
+  private resolveRemoteStream: (value?: (PromiseLike<MediaStream> | MediaStream)) => void = () => {
+  };
 
   static async connectRemote(
     ownUUID: UUID,
@@ -28,24 +40,24 @@ export class PeerProxy {
     remotePeerUUID: UUID,
     signallingChannel: SignallingChannel,
     sessionDescription: RTCSessionDescriptionInit
-): Promise<PeerProxy> {
+  ): Promise<PeerProxy> {
     const peerProxy = new PeerProxy(ownUUID, remotePeerUUID, signallingChannel)
     await peerProxy.handleReceivedOffer(sessionDescription);
     return peerProxy;
   }
 
   async handleIceCandidate(candidate: RTCIceCandidate) {
-      if (this.peerConnection?.iceConnectionState === 'connected') {
-        console.log("ICE connection is established", this.remotePeerUUID)
-        this.signallingChannel.onPeerEvent(iceConnected(this.remotePeerUUID))
-        return;
-      }
-      try {
-        await this.peerConnection?.addIceCandidate(candidate);
-        this.signallingChannel.onPeerEvent(dataChannelStatusChange(this.remotePeerUUID, "READY"))
-      } catch (e) {
-        console.log('ICE candidate error', e)
-      }
+    if (this.peerConnection?.iceConnectionState === 'connected') {
+      console.log("ICE connection is established", this.remotePeerUUID)
+      this.signallingChannel.onPeerEvent(iceConnected(this.remotePeerUUID, this.remoteStream))
+      return;
+    }
+    try {
+      await this.peerConnection?.addIceCandidate(candidate);
+      this.signallingChannel.onPeerEvent(dataChannelStatusChange(this.remotePeerUUID, "READY"))
+    } catch (e) {
+      console.log('ICE candidate error', e)
+    }
   }
 
   async handleAnswer(description: RTCSessionDescriptionInit) {
@@ -57,10 +69,35 @@ export class PeerProxy {
     this.msgChannel?.send(msg);
   }
 
+  async getLocalAudio(): Promise<MediaStream> {
+    const localTracks = await this.localTracks;
+    return localTracks.stream;
+  }
+
+  async getRemoteAudio(): Promise<MediaStream> {
+    return await this.remoteStream;
+  }
+
   private async establishConnection() {
     const peerConn = await this.createPeerConnection(true);
 
-    const offer = await peerConn.createOffer({offerToReceiveAudio: true});
+    peerConn.ontrack = (ev) => {
+      console.log('Received remote stream', ev.streams[0]);
+      this.resolveRemoteStream(ev.streams[0]);
+      this.remoteStream.then(s => {
+        console.log('Connect remote stream', ev.streams[0]);
+        audioContext.createMediaStreamSource(s).connect(localOutput)
+      })
+    }
+
+    const localTracks = await this.localTracks;
+    localTracks.tracks.forEach(t => this.peerConnection?.addTrack(t, localTracks.stream));
+
+    const offer = await peerConn.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: false,
+      voiceActivityDetection: false
+    });
     await peerConn.setLocalDescription(offer);
     this.signallingChannel.send({
       event: 'rtc_offer',
@@ -72,6 +109,9 @@ export class PeerProxy {
 
   private async handleReceivedOffer(sessionDescription: RTCSessionDescriptionInit) {
     const peerConnection = await this.createPeerConnection();
+
+    const localTracks = await this.localTracks;
+    localTracks.tracks.forEach(t => this.peerConnection?.addTrack(t, localTracks.stream));
 
     if (peerConnection.currentRemoteDescription) {
       console.log("Already have remote description")
@@ -85,6 +125,14 @@ export class PeerProxy {
         console.log('onmessage', me)
         this.signallingChannel.onPeerEvent(receivedDataMessage(this.remotePeerUUID, me.data))
       }
+    }
+    peerConnection.ontrack = ev => {
+      console.log('Received remote stream', ev.streams[0]);
+      this.resolveRemoteStream(ev.streams[0]);
+      this.remoteStream.then(s => {
+        console.log('Connect remote stream', ev.streams[0]);
+        audioContext.createMediaStreamSource(s).connect(localOutput)
+      })
     }
 
     await peerConnection.setRemoteDescription(sessionDescription);
@@ -112,6 +160,7 @@ export class PeerProxy {
         this.signallingChannel.onPeerEvent(receivedDataMessage(this.remotePeerUUID, me.data));
       }
     }
+
     this.peerConnection.onnegotiationneeded = ev => console.log('negotiationneeded', ev);
     this.peerConnection.onsignalingstatechange = ev => console.log('signalingstatechange', ev);
     this.peerConnection.onconnectionstatechange = ev => console.log('connectionstatechange', ev);
@@ -119,7 +168,7 @@ export class PeerProxy {
     this.peerConnection.oniceconnectionstatechange = ev => {
       console.log('oniceconnectionstatechange', ev)
       if ((ev.currentTarget as any).iceConnectionState === 'connected') {
-        this.signallingChannel.onPeerEvent(iceConnected(this.remotePeerUUID))
+        this.signallingChannel.onPeerEvent(iceConnected(this.remotePeerUUID, this.remoteStream))
         this.signallingChannel.onPeerEvent(dataChannelStatusChange(this.remotePeerUUID, "READY"))
       }
     }
@@ -138,6 +187,27 @@ export class PeerProxy {
 
     return this.peerConnection;
   }
+}
+
+async function getLocalTracks(): Promise<{ tracks: MediaStreamTrack[], stream: MediaStream }> {
+  await navigator.mediaDevices.getUserMedia({audio: true, video: true});
+  const localStream = await navigator.mediaDevices
+    .getUserMedia({
+      audio: true,
+      video: false
+    });
+  console.log('Got local stream', localStream);
+  const audioTracks = localStream.getAudioTracks();
+  if (audioTracks.length > 0) {
+    console.log(`Using Audio device: ${audioTracks[0].label}`);
+  }
+
+  return {tracks: await localStream.getTracks(), stream: localStream};
+}
+
+interface LocalTracks {
+  tracks: MediaStreamTrack[],
+  stream: MediaStream
 }
 
 const configuration = {

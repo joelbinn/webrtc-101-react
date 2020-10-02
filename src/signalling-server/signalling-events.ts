@@ -70,6 +70,7 @@ export type SignallingEvent =
 export interface RtcSignal {
   name: 'IceConnected'
   peer: UUID
+  audio: Promise<MediaStream>
 }
 
 export interface DataChannelStatusChange {
@@ -79,8 +80,8 @@ export interface DataChannelStatusChange {
 }
 
 
-export function iceConnected(peer: UUID): RtcSignal {
-  return {name: 'IceConnected', peer};
+export function iceConnected(peer: UUID, audio: Promise<MediaStream>): RtcSignal {
+  return {name: 'IceConnected', peer, audio};
 }
 
 export function dataChannelStatusChange(peer: UUID, status: DataChannelStatus): DataChannelStatusChange {

@@ -15,7 +15,8 @@ export class SignallingChannel {
     if (this.ws) {
       return;
     }
-    this.ws = new WebSocket('ws://localhost:9898/');
+    const host = window.location.hostname;
+    this.ws = new WebSocket(`ws://${host}:9898/`);
     this.ws.onopen = () => {
       console.log('WebSocket Client Connected');
       this.isOpen = true

@@ -17,21 +17,21 @@ const App: React.FC = () => {
     async function init() {
       console.log("APP INIT")
       try {
-        const videoCameras = await getConnectedDevices('videoinput')
-        console.log("SET DEVICES")
-        dispatch({type: "SetDevices", devices: videoCameras})
-
-        const stream = await openMediaDevices({
-          'video': {deviceId: videoCameras[0]?.deviceId},
-          'audio': true
-        })
-        console.log("SET MEDIA STREAM")
-        dispatch({type: "SetMediaStream", stream})
-
-        if (videoElement.current) {
-          videoElement.current.srcObject = stream;
-        }
-
+        // const videoCameras = await getConnectedDevices('videoinput')
+        // console.log("SET DEVICES")
+        // dispatch({type: "SetDevices", devices: videoCameras})
+        //
+        // const stream = await openMediaDevices({
+        //   'video': {deviceId: videoCameras[0]?.deviceId},
+        //   'audio': true
+        // })
+        // console.log("SET MEDIA STREAM")
+        // dispatch({type: "SetMediaStream", stream})
+        //
+        // if (videoElement.current) {
+        //   videoElement.current.srcObject = stream;
+        // }
+        //
         const name = sessionStorage.getItem('web-rtc-name')
         if (name) {
           setTimeout(() => dispatch({type: "SetName", name}), 100);
@@ -107,11 +107,12 @@ const App: React.FC = () => {
 export default App
 
 async function openMediaDevices(constraints: MediaStreamConstraints): Promise<MediaStream> {
-  return await navigator.mediaDevices.getUserMedia(constraints)
+  const devices = await navigator.mediaDevices
+  return devices?.getUserMedia(constraints) || [];
 }
 
 async function getConnectedDevices(type: MediaDeviceKind): Promise<MediaDeviceInfo[]> {
-  const devices = await navigator.mediaDevices.enumerateDevices();
+  const devices = await navigator.mediaDevices?.enumerateDevices() || [];
   return devices.filter(device => device.kind === type)
 }
 
